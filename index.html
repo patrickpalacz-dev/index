@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalmar WMS Label System</title>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<style>
+body{font-family: Arial; max-width:1600px; margin:20px auto; padding:20px;}
+.header{display:flex; align-items:center; gap:20px;}
+.header img{height:60px;}
+textarea{width:100%;height:120px;}
+button{padding:6px 10px; margin:4px; cursor:pointer; border:1px solid #ccc; background:#f5f5f5; border-radius:4px;}
+button:hover{background:#e9e9e9;}
+.panel{border:1px solid #ddd; padding:10px; margin:10px 0; background:#fafafa; border-radius:6px;}
+#search{width:140px; padding:4px; border:1px solid #ccc; border-radius:4px;}
+#batchPrint{width:90px; padding:4px; border:1px solid #ccc; border-radius:4px;}
+select,input[type="file"]{padding:4px; border:1px solid #ccc; border-radius:4px;}
+table{width:100%; border-collapse:collapse; margin-top:10px; font-size:12px;}
+th,td{border:1px solid #ddd; padding:6px; text-align:center;}
+th{background:#f3f3f3;}
+tr.done{background:#d4ffd4;}
+tr.oklejone{background:#ffe4b5;}
+.qt input.warn{background:#fff3cd; font-weight:bold;}
+input{width:100%; border:none; background:transparent; text-align:center;}
+svg{width:120px;height:45px;}
+.status{position:relative;}
+.status:hover::after{content: attr(data-tip); position:absolute; left:0; top:-25px; background:black; color:white; padding:5px; font-size:10px; white-space:nowrap; border-radius:4px;}
+input:focus{outline:2px solid #4a90e2;}
+</style>
+</head>
+<body>
+
+<div class="header">
+<img src="https://pracakalmar.pl/wp-content/uploads/2024/08/Kalmar_Primary-Logo_Horizontal_RGB.-1.png">
+<h2>Label System</h2>
+</div>
+
+<div>
+<button onclick="loadItems()">Załaduj</button>
+<button onclick="selectAll()">Zaznacz</button>
+<button onclick="clearAll()">Odznacz</button>
+<button onclick="printSelected()">Druk</button>
+<button onclick="markAsLabeled()">Wyczyść wydrukowane</button>
+<button onclick="clearAllTable()">Wyczyść wszystko</button>
+<button onclick="toggleDashboard()">📊 Dashboard</button>
+</div>
+
+<div id="dashboard" class="panel" style="display:none;"></div>
+
+<div class="panel">
+<input id="batchPrint" placeholder="paleta">
+<button onclick="printByPallet()">Druk palety</button>
+<br><br>
+<input type="file" id="fileInput" accept=".csv,.txt,.xlsx">
+<br><br>
+<input id="search" placeholder="szukaj..." oninput="filterTable()">
+<select id="statusFilter" onchange="filterTable()">
+<option value="">Wszystkie</option>
+<option value="Oczekuje">Oczekuje</option>
+<option value="OKLEJONE">OKLEJONE</option>
+<option value="DO WERYFIKACJI">DO WERYFIKACJI</option>
+</select>
+</div>
+
+<textarea id="input"></textarea>
+
+<table>
+<thead>
+<tr>
+<th>✔</th>
+<th>PO</th>
+<th>ITEM</th>
+<th>QT</th>
+<th>PO BAR</th>
+<th>ITEM BAR</th>
+<th>PALETA</th>
+<th>DATA</th>
+<th>STATUS</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+
+<script>
+
+// ======== LOCAL STORAGE FUNCTIONS ========
+function save(){
+    const rows=[];
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        rows.push({
+            po: r.querySelector(".po").value,
+            item: r.querySelector(".item").value,
+            qt: r.querySelector(".qt input").value,
+            pallet: r.querySelector(".pallet").value,
+            date: r.querySelector(".date").textContent,
+            status: r.querySelector(".status").textContent,
+            classList: Array.from(r.classList) // done / oklejone
+        });
+    });
+    localStorage.setItem("wmsData", JSON.stringify(rows));
+}
+
+function loadFromStorage(){
+    const data=localStorage.getItem("wmsData");
+    if(!data) return;
+    const rows=JSON.parse(data);
+    const tbody=document.getElementById("tbody");
+    tbody.innerHTML="";
+    rows.forEach(rdata=>{
+        const row=document.createElement("tr");
+        row.className = rdata.classList.join(" ");
+        row.innerHTML=`
+<td><input type="checkbox"></td>
+<td><input class="po" value="${rdata.po}"></td>
+<td><input class="item" value="${rdata.item}"></td>
+<td class="qt"><input value="${rdata.qt}" class="${rdata.status.includes("DO WERYFIKACJI")?"warn":""}"></td>
+<td><svg class="bp"></svg></td>
+<td><svg class="bi"></svg></td>
+<td><input class="pallet" value="${rdata.pallet}"></td>
+<td class="date">${rdata.date}</td>
+<td class="status" data-tip="${rdata.status.includes("DO WERYFIKACJI")?`QT było: ${rdata.qt}`:""}">${rdata.status}</td>
+`;
+        tbody.appendChild(row);
+        const bp=row.querySelector(".bp");
+        const bi=row.querySelector(".bi");
+        JsBarcode(bp,rdata.po,{format:"CODE128",width:1.5,height:40});
+        JsBarcode(bi,rdata.item,{format:"CODE128",width:1.5,height:40});
+
+        // QT warning listener
+        const qtInput=row.querySelector(".qt input");
+        let oldQT=rdata.qt;
+        qtInput.addEventListener("change",()=>{
+            if(qtInput.value!==oldQT){
+                qtInput.classList.add("warn");
+                const statusEl=row.querySelector(".status");
+                statusEl.textContent="DO WERYFIKACJI ⚠️";
+                statusEl.dataset.tip=`QT było: ${oldQT} → teraz: ${qtInput.value}`;
+                oldQT=qtInput.value;
+                save();
+            }
+        });
+
+        // Barcode update listener
+        const poInput=row.querySelector(".po");
+        const itemInput=row.querySelector(".item");
+        function updateBarcode(){
+            JsBarcode(bp,poInput.value,{format:"CODE128",width:1.5,height:40});
+            JsBarcode(bi,itemInput.value,{format:"CODE128",width:1.5,height:40});
+            save();
+        }
+        poInput.addEventListener("input",updateBarcode);
+        itemInput.addEventListener("input",updateBarcode);
+    });
+}
+
+// ======== FILE IMPORT ========
+document.getElementById("fileInput").addEventListener("change",e=>{
+    const f=e.target.files[0];
+    if(!f) return;
+    const r=new FileReader();
+    r.onload=ev=>{
+        let text="";
+        if(f.name.endsWith(".xlsx")){
+            const data=new Uint8Array(ev.target.result);
+            const wb=XLSX.read(data,{type:"array"});
+            const sh=wb.Sheets[wb.SheetNames[0]];
+            const js=XLSX.utils.sheet_to_json(sh,{header:1});
+            text=js.map(r=> (r||[]).join(";")).join("\n");
+        }else{text=ev.target.result;}
+        document.getElementById("input").value=text;
+    };
+    if(f.name.endsWith(".xlsx")) r.readAsArrayBuffer(f);
+    else r.readAsText(f);
+});
+
+// ======== LOAD ITEMS ========
+function loadItems(){
+    const lines=document.getElementById("input").value.split(/\r?\n/).filter(x=>x);
+    if(lines.length===0){alert("Brak danych"); return;}
+    const tbody=document.getElementById("tbody");
+    tbody.innerHTML="";
+    lines.forEach(l=>{
+        const p=l.includes("\t")?l.split("\t"):l.split(";");
+        const po=p[0]||"", item=p[1]||"", qt=p[2]||"";
+        const row=document.createElement("tr");
+        row.innerHTML=`
+<td><input type="checkbox"></td>
+<td><input class="po" value="${po}"></td>
+<td><input class="item" value="${item}"></td>
+<td class="qt"><input value="${qt}"></td>
+<td><svg class="bp"></svg></td>
+<td><svg class="bi"></svg></td>
+<td><input class="pallet"></td>
+<td class="date"></td>
+<td class="status" data-tip="">Oczekuje</td>
+`;
+        tbody.appendChild(row);
+        const bp=row.querySelector(".bp");
+        const bi=row.querySelector(".bi");
+        JsBarcode(bp,po,{format:"CODE128",width:1.5,height:40});
+        JsBarcode(bi,item,{format:"CODE128",width:1.5,height:40});
+
+        // QT warning
+        const qtInput=row.querySelector(".qt input");
+        let oldQT=qtInput.value;
+        qtInput.addEventListener("change",()=>{
+            if(qtInput.value!==oldQT){
+                qtInput.classList.add("warn");
+                const statusEl=row.querySelector(".status");
+                statusEl.textContent="DO WERYFIKACJI ⚠️";
+                statusEl.dataset.tip=`QT było: ${oldQT} → teraz: ${qtInput.value}`;
+                oldQT=qtInput.value;
+                save();
+            }
+        });
+
+        // Barcode update
+        const poInput=row.querySelector(".po");
+        const itemInput=row.querySelector(".item");
+        function updateBarcode(){
+            JsBarcode(bp,poInput.value,{format:"CODE128",width:1.5,height:40});
+            JsBarcode(bi,itemInput.value,{format:"CODE128",width:1.5,height:40});
+            save();
+        }
+        poInput.addEventListener("input",updateBarcode);
+        itemInput.addEventListener("input",updateBarcode);
+    });
+    save();
+}
+
+// ======== FILTER ========
+function filterTable(){
+    const t=document.getElementById("search").value.toLowerCase();
+    const s=document.getElementById("statusFilter").value;
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        const inputs=r.querySelectorAll("input");
+        const status=r.querySelector(".status").textContent;
+        let ok=false;
+        inputs.forEach(i=>{
+            if((i.value||"").toLowerCase().includes(t)) ok=true;
+        });
+        const matchStatus=!s || status.includes(s);
+        r.style.display=(ok && matchStatus) ? "" : "none";
+    });
+}
+
+// ======== PRINT ========
+function printSelected(){
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        const cb=r.querySelector("input[type=checkbox]");
+        if(cb && cb.checked){
+            r.classList.add("done");
+            const statusEl=r.querySelector(".status");
+            if(!statusEl.textContent.includes("DO WERYFIKACJI")){
+                statusEl.textContent="Wysłano do wydruku";
+            }
+        }
+    });
+    save();
+}
+
+// ======== PALLET ========
+function printByPallet(){
+    const p=document.getElementById("batchPrint").value;
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        const pal=r.querySelector(".pallet").value;
+        if(pal===p){
+            r.classList.add("done");
+            const statusEl=r.querySelector(".status");
+            if(!statusEl.textContent.includes("DO WERYFIKACJI")){
+                statusEl.textContent="Wysłano do wydruku";
+            }
+            const cb=r.querySelector("input[type=checkbox]");
+            if(cb) cb.checked=true;
+        }
+    });
+    save();
+}
+
+// ======== LABELLED ========
+function markAsLabeled(){
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        if(r.classList.contains("done")){
+            r.classList.remove("done");
+            r.classList.add("oklejone");
+            r.querySelector(".status").textContent="OKLEJONE";
+            r.querySelector(".date").textContent = new Date().toLocaleString();
+        }
+    });
+    save();
+}
+
+// ======== DASHBOARD ========
+function toggleDashboard(){
+    const d=document.getElementById("dashboard");
+    if(d.style.display==="block"){d.style.display="none"; return;}
+    let o=0,w=0,k=0,v=0;
+    document.querySelectorAll("#tbody tr").forEach(r=>{
+        const s=r.querySelector(".status").textContent;
+        if(s.includes("Oczekuje"))o++;
+        if(s.includes("Wysłano"))w++;
+        if(s.includes("OKLEJONE"))k++;
+        if(s.includes("DO WERYFIKACJI"))v++;
+    });
+    d.innerHTML=`Oczekuje: ${o}<br>Wydruk: ${w}<br>OKLEJONE: ${k}<br>WERYFIKACJA: ${v}`;
+    d.style.display="block";
+}
+
+// ======== UTILS ========
+function selectAll(){document.querySelectorAll("#tbody input[type=checkbox]").forEach(c=>c.checked=true);}
+function clearAll(){document.querySelectorAll("#tbody input[type=checkbox]").forEach(c=>c.checked=false);}
+function clearAllTable(){document.getElementById("tbody").innerHTML=""; document.getElementById("input").value=""; localStorage.removeItem("wmsData");}
+
+// ======== AUTOLOAD ========
+window.addEventListener("load", loadFromStorage);
+
+</script>
+
+</body>
+</html>
