@@ -30,6 +30,13 @@ svg{width:120px;height:45px;}
 .status{position:relative;}
 .status:hover::after{content: attr(data-tip); position:absolute; left:0; top:-25px; background:black; color:white; padding:5px; font-size:10px; white-space:nowrap; border-radius:4px;}
 input:focus{outline:2px solid #4a90e2;}
+#camera {
+    border: 2px solid #333;
+}
+
+#overlay {
+    pointer-events: none;
+}
 </style>
 </head>
 <body>
@@ -84,7 +91,27 @@ input:focus{outline:2px solid #4a90e2;}
 </thead>
 <tbody id="tbody"></tbody>
 </table>
+<div id="ocrBox" style="
+    position:fixed;
+    bottom:20px;
+    right:20px;
+    z-index:999999;
+    background:white;
+    border:1px solid #ccc;
+    padding:10px;
+">
+    <video id="camera" autoplay playsinline style="width:280px;"></video>
+    <canvas id="overlay" style="position:absolute;"></canvas>
 
+    <div style="margin-top:10px;">
+        <button id="startCam">Start kamera</button>
+        <button id="stopCam">Stop</button>
+        <button id="scanOnce">Skanuj PO</button>
+    </div>
+
+    <input id="po-input" placeholder="PO" style="width:120px;margin-top:5px;">
+    <button id="po-send">Zapisz PO</button>
+</div>
 <script>
 
 // ======== LOCAL STORAGE FUNCTIONS ========
@@ -363,54 +390,92 @@ document.getElementById("po-send").onclick = () => {
 };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script>
 
-document.getElementById("scan-po").onclick = () => {
-    document.getElementById("camera-input").click();
+<script>
+let stream = null;
+
+const video = document.getElementById("camera");
+const canvas = document.getElementById("overlay");
+const ctx = canvas.getContext("2d");
+
+const ROI = { x: 50, y: 60, w: 200, h: 80 };
+
+function draw() {
+    if (!video) return;
+
+    canvas.width = video.clientWidth;
+    canvas.height = video.clientHeight;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(ROI.x, ROI.y, ROI.w, ROI.h);
+
+    requestAnimationFrame(draw);
+}
+
+document.getElementById("startCam").onclick = async () => {
+    stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
+    });
+
+    video.srcObject = stream;
+    draw();
 };
 
-document.getElementById("camera-input").addEventListener("change", async (e) => {
+document.getElementById("stopCam").onclick = () => {
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+    }
+};
 
-    const file = e.target.files[0];
+async function scanPO() {
+    if (!video.videoWidth) return;
 
-    if (!file) return;
+    const temp = document.createElement("canvas");
+    temp.width = ROI.w;
+    temp.height = ROI.h;
 
-    try {
+    const tctx = temp.getContext("2d");
 
-        alert("Odczytuję numer PO...");
+    tctx.drawImage(
+        video,
+        ROI.x, ROI.y, ROI.w, ROI.h,
+        0, 0, ROI.w, ROI.h
+    );
 
-        const result = await Tesseract.recognize(
-            file,
-            "eng"
-        );
+    const img = temp.toDataURL("image/png");
 
-        const text = result.data.text;
+    const result = await Tesseract.recognize(img, "eng");
 
-        console.log("OCR:", text);
+    const text = result.data.text;
+    const match = text.match(/\d{6,15}/);
 
-        const match = text.match(/\d{6,15}/);
-
-        if (!match) {
-            alert("Nie znaleziono numeru PO");
-            return;
-        }
-
+    if (match) {
         document.getElementById("po-input").value = match[0];
-
-        // automatyczne wysłanie do LN
         document.getElementById("po-send").click();
-
     }
-    catch(err) {
+}
 
-        console.error(err);
+document.getElementById("scanOnce").onclick = scanPO;
 
-        alert("Błąd OCR");
+setInterval(() => {
+    if (stream) scanPO();
+}, 2000);
 
+// ONLY ONE handler
+document.getElementById("po-send").onclick = () => {
+    const po = document.getElementById("po-input").value;
+
+    if (!po) {
+        alert("Brak PO");
+        return;
     }
 
-});
-
+    localStorage.setItem("PO_VALUE", po);
+    alert("Zapisano PO: " + po);
+};
 </script>
 </body>
 </html>
