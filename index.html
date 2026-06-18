@@ -395,87 +395,123 @@ document.getElementById("po-send").onclick = () => {
 let stream = null;
 
 const video = document.getElementById("camera");
-const canvas = document.getElementById("overlay");
-const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d");
 
-const ROI = { x: 50, y: 60, w: 200, h: 80 };
+let roi = { x: 60, y: 80, w: 180, h: 80 };
+let dragging = false;
 
-function draw() {
-    if (!video) return;
-
-    canvas.width = video.clientWidth;
-    canvas.height = video.clientHeight;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "red";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(ROI.x, ROI.y, ROI.w, ROI.h);
-
-    requestAnimationFrame(draw);
-}
-
+// ===== CAMERA START =====
 document.getElementById("startCam").onclick = async () => {
+
     stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" }
     });
 
     video.srcObject = stream;
-    draw();
+
+    setTimeout(() => {
+        overlay.width = video.clientWidth;
+        overlay.height = video.clientHeight;
+        draw();
+    }, 500);
 };
 
+// ===== STOP =====
 document.getElementById("stopCam").onclick = () => {
-    if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-        stream = null;
-    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
 };
 
-async function scanPO() {
-    if (!video.videoWidth) return;
+// ===== DRAW ROI BOX =====
+function draw(){
+    if(!stream) return;
+
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    ctx.strokeStyle="red";
+    ctx.lineWidth=3;
+    ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
+
+    requestAnimationFrame(draw);
+}
+
+// ===== MOVE BOX (mouse/touch simple drag) =====
+overlay.addEventListener("mousedown",(e)=>{
+    dragging = true;
+    roi.x = e.offsetX;
+    roi.y = e.offsetY;
+});
+
+overlay.addEventListener("mousemove",(e)=>{
+    if(!dragging) return;
+
+    roi.w = e.offsetX - roi.x;
+    roi.h = e.offsetY - roi.y;
+});
+
+overlay.addEventListener("mouseup",()=>dragging=false);
+
+// ===== OCR =====
+async function scanPO(){
+
+    if(!video.videoWidth) return;
 
     const temp = document.createElement("canvas");
-    temp.width = ROI.w;
-    temp.height = ROI.h;
+
+    temp.width = Math.abs(roi.w);
+    temp.height = Math.abs(roi.h);
 
     const tctx = temp.getContext("2d");
 
     tctx.drawImage(
         video,
-        ROI.x, ROI.y, ROI.w, ROI.h,
-        0, 0, ROI.w, ROI.h
+        roi.x, roi.y, roi.w, roi.h,
+        0, 0, temp.width, temp.height
     );
 
-    const img = temp.toDataURL("image/png");
-
-    const result = await Tesseract.recognize(img, "eng");
-
+    const result = await Tesseract.recognize(temp, "eng");
     const text = result.data.text;
+
+    console.log("OCR:", text);
+
     const match = text.match(/\d{6,15}/);
 
-    if (match) {
+    if(match){
+
         document.getElementById("po-input").value = match[0];
+
+        // 👉 JEDYNE WYJŚCIE DO LN (NIE NADPISUJEMY EVENTU)
         document.getElementById("po-send").click();
+
+    } else {
+        alert("Nie znaleziono numeru PO");
     }
 }
 
 document.getElementById("scanOnce").onclick = scanPO;
 
-setInterval(() => {
-    if (stream) scanPO();
-}, 2000);
+// ===== FIX: NIE NADPISUJEMY po-send (ważne) =====
+function sendToLN(){
 
-// ONLY ONE handler
-document.getElementById("po-send").onclick = () => {
     const po = document.getElementById("po-input").value;
 
-    if (!po) {
+    if(!po){
         alert("Brak PO");
         return;
     }
 
     localStorage.setItem("PO_VALUE", po);
     alert("Zapisano PO: " + po);
-};
+}
+
+// podpinamy tylko raz
+document.getElementById("po-send").onclick = sendToLN;
+
+// auto scan (opcjonalne)
+setInterval(()=>{
+    if(stream) scanPO();
+}, 2000);
+
 </script>
 </body>
 </html>
