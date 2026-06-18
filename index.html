@@ -330,7 +330,22 @@ window.addEventListener("load", loadFromStorage);
     font-family: Arial;
 ">
     <input id="po-input" placeholder="Wpisz PO" style="padding:6px; width:150px;" />
-    <button id="po-send" style="padding:6px;">Zapisz PO</button>
+
+    <button id="scan-po" style="padding:6px;">
+        📷 Skanuj PO
+    </button>
+
+    <button id="po-send" style="padding:6px;">
+        Zapisz PO
+    </button>
+
+    <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        id="camera-input"
+        style="display:none"
+    />
 </div>
 
 <script>
@@ -346,6 +361,56 @@ document.getElementById("po-send").onclick = () => {
 
     alert("Zapisano PO: " + po);
 };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+
+document.getElementById("scan-po").onclick = () => {
+    document.getElementById("camera-input").click();
+};
+
+document.getElementById("camera-input").addEventListener("change", async (e) => {
+
+    const file = e.target.files[0];
+
+    if (!file) return;
+
+    try {
+
+        alert("Odczytuję numer PO...");
+
+        const result = await Tesseract.recognize(
+            file,
+            "eng"
+        );
+
+        const text = result.data.text;
+
+        console.log("OCR:", text);
+
+        const match = text.match(/\d{6,15}/);
+
+        if (!match) {
+            alert("Nie znaleziono numeru PO");
+            return;
+        }
+
+        document.getElementById("po-input").value = match[0];
+
+        // automatyczne wysłanie do LN
+        document.getElementById("po-send").click();
+
+    }
+    catch(err) {
+
+        console.error(err);
+
+        alert("Błąd OCR");
+
+    }
+
+});
+
 </script>
 </body>
 </html>
