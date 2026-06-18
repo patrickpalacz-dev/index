@@ -30,13 +30,6 @@ svg{width:120px;height:45px;}
 .status{position:relative;}
 .status:hover::after{content: attr(data-tip); position:absolute; left:0; top:-25px; background:black; color:white; padding:5px; font-size:10px; white-space:nowrap; border-radius:4px;}
 input:focus{outline:2px solid #4a90e2;}
-#camera {
-    border: 2px solid #333;
-}
-
-#overlay {
-    pointer-events: none;
-}
 </style>
 </head>
 <body>
@@ -91,27 +84,7 @@ input:focus{outline:2px solid #4a90e2;}
 </thead>
 <tbody id="tbody"></tbody>
 </table>
-<div id="ocrBox" style="
-    position:fixed;
-    bottom:20px;
-    right:20px;
-    z-index:999999;
-    background:white;
-    border:1px solid #ccc;
-    padding:10px;
-">
-    <video id="camera" autoplay playsinline style="width:280px;"></video>
-    <canvas id="overlay" style="position:absolute;"></canvas>
 
-    <div style="margin-top:10px;">
-        <button id="startCam">Start kamera</button>
-        <button id="stopCam">Stop</button>
-        <button id="scanOnce">Skanuj PO</button>
-    </div>
-
-    <input id="po-input" placeholder="PO" style="width:120px;margin-top:5px;">
-    <button id="po-send">Zapisz PO</button>
-</div>
 <script>
 
 // ======== LOCAL STORAGE FUNCTIONS ========
@@ -357,22 +330,7 @@ window.addEventListener("load", loadFromStorage);
     font-family: Arial;
 ">
     <input id="po-input" placeholder="Wpisz PO" style="padding:6px; width:150px;" />
-
-    <button id="scan-po" style="padding:6px;">
-        📷 Skanuj PO
-    </button>
-
-    <button id="po-send" style="padding:6px;">
-        Zapisz PO
-    </button>
-
-    <input
-        type="file"
-        accept="image/*"
-        capture="environment"
-        id="camera-input"
-        style="display:none"
-    />
+    <button id="po-send" style="padding:6px;">Zapisz PO</button>
 </div>
 
 <script>
@@ -388,130 +346,6 @@ document.getElementById("po-send").onclick = () => {
 
     alert("Zapisano PO: " + po);
 };
-</script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-<script>
-let stream = null;
-
-const video = document.getElementById("camera");
-const overlay = document.getElementById("overlay");
-const ctx = overlay.getContext("2d");
-
-let roi = { x: 60, y: 80, w: 180, h: 80 };
-let dragging = false;
-
-// ===== CAMERA START =====
-document.getElementById("startCam").onclick = async () => {
-
-    stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-    });
-
-    video.srcObject = stream;
-
-    setTimeout(() => {
-        overlay.width = video.clientWidth;
-        overlay.height = video.clientHeight;
-        draw();
-    }, 500);
-};
-
-// ===== STOP =====
-document.getElementById("stopCam").onclick = () => {
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = null;
-};
-
-// ===== DRAW ROI BOX =====
-function draw(){
-    if(!stream) return;
-
-    ctx.clearRect(0,0,overlay.width,overlay.height);
-    ctx.strokeStyle="red";
-    ctx.lineWidth=3;
-    ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
-
-    requestAnimationFrame(draw);
-}
-
-// ===== MOVE BOX (mouse/touch simple drag) =====
-overlay.addEventListener("mousedown",(e)=>{
-    dragging = true;
-    roi.x = e.offsetX;
-    roi.y = e.offsetY;
-});
-
-overlay.addEventListener("mousemove",(e)=>{
-    if(!dragging) return;
-
-    roi.w = e.offsetX - roi.x;
-    roi.h = e.offsetY - roi.y;
-});
-
-overlay.addEventListener("mouseup",()=>dragging=false);
-
-// ===== OCR =====
-async function scanPO(){
-
-    if(!video.videoWidth) return;
-
-    const temp = document.createElement("canvas");
-
-    temp.width = Math.abs(roi.w);
-    temp.height = Math.abs(roi.h);
-
-    const tctx = temp.getContext("2d");
-
-    tctx.drawImage(
-        video,
-        roi.x, roi.y, roi.w, roi.h,
-        0, 0, temp.width, temp.height
-    );
-
-    const result = await Tesseract.recognize(temp, "eng");
-    const text = result.data.text;
-
-    console.log("OCR:", text);
-
-    const match = text.match(/\d{6,15}/);
-
-    if(match){
-
-        document.getElementById("po-input").value = match[0];
-
-        // 👉 JEDYNE WYJŚCIE DO LN (NIE NADPISUJEMY EVENTU)
-        document.getElementById("po-send").click();
-
-    } else {
-        alert("Nie znaleziono numeru PO");
-    }
-}
-
-document.getElementById("scanOnce").onclick = scanPO;
-
-// ===== FIX: NIE NADPISUJEMY po-send (ważne) =====
-function sendToLN(){
-
-    const po = document.getElementById("po-input").value;
-
-    if(!po){
-        alert("Brak PO");
-        return;
-    }
-
-    localStorage.setItem("PO_VALUE", po);
-    alert("Zapisano PO: " + po);
-}
-
-// podpinamy tylko raz
-document.getElementById("po-send").onclick = sendToLN;
-
-// auto scan (opcjonalne)
-setInterval(()=>{
-    if(stream) scanPO();
-}, 2000);
-
 </script>
 </body>
 </html>
